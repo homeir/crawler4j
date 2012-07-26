@@ -17,6 +17,11 @@
 
 package edu.uci.ics.crawler4j.crawler;
 
+import java.util.ArrayList;
+import java.util.List;
+
+import edu.uci.ics.crawler4j.login.LoginConfiguration;
+
 public class CrawlConfig {
 
 	/**
@@ -102,6 +107,11 @@ public class CrawlConfig {
 	private boolean followRedirects = true;
 
 	/**
+	 * Maximum count of redirect
+	 */
+	private int maxRedirectCount = 5;
+
+	/**
 	 * If crawler should run behind a proxy, this parameter can be used for
 	 * specifying the proxy host.
 	 */
@@ -127,12 +137,14 @@ public class CrawlConfig {
 	 */
 	private String proxyPassword = null;
 
+	private List<LoginConfiguration> loginConfigurations = new ArrayList<LoginConfiguration>();
+
 	public CrawlConfig() {
 	}
 
 	/**
 	 * Validates the configs specified by this instance.
-	 * 
+	 *
 	 * @throws Exception
 	 */
 	public void validate() throws Exception {
@@ -218,7 +230,7 @@ public class CrawlConfig {
 	/**
 	 * Politeness delay in milliseconds (delay between sending two requests to
 	 * the same host).
-	 * 
+	 *
 	 * @param politenessDelay
 	 *            the delay in milliseconds.
 	 */
@@ -326,6 +338,14 @@ public class CrawlConfig {
 		this.followRedirects = followRedirects;
 	}
 
+	public int getMaxRedirectCount() {
+		return maxRedirectCount;
+	}
+
+	public void setMaxRedirectCount(int maxRedirectCount) {
+		this.maxRedirectCount = maxRedirectCount;
+	}
+
 	public String getProxyHost() {
 		return proxyHost;
 	}
@@ -374,6 +394,14 @@ public class CrawlConfig {
 	 */
 	public void setProxyPassword(String proxyPassword) {
 		this.proxyPassword = proxyPassword;
+	}
+
+	public void addLoginConfiguration(LoginConfiguration conf){
+		loginConfigurations.add(conf);
+	}
+
+	public List<LoginConfiguration> getLoginConfigurations(){
+		return loginConfigurations;
 	}
 
 	@Override

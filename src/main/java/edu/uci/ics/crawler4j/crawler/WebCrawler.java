@@ -17,27 +17,36 @@
 
 package edu.uci.ics.crawler4j.crawler;
 
-import edu.uci.ics.crawler4j.fetcher.PageFetchResult;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.util.ArrayList;
+import java.util.List;
+
+import org.apache.http.HttpResponse;
+import org.apache.http.HttpStatus;
+import org.apache.http.NameValuePair;
+import org.apache.http.client.entity.UrlEncodedFormEntity;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.message.BasicNameValuePair;
+import org.apache.http.protocol.HTTP;
+import org.apache.log4j.Logger;
+
 import edu.uci.ics.crawler4j.fetcher.CustomFetchStatus;
+import edu.uci.ics.crawler4j.fetcher.PageFetchResult;
 import edu.uci.ics.crawler4j.fetcher.PageFetcher;
 import edu.uci.ics.crawler4j.frontier.DocIDServer;
 import edu.uci.ics.crawler4j.frontier.Frontier;
+import edu.uci.ics.crawler4j.login.LoginConfiguration;
 import edu.uci.ics.crawler4j.parser.HtmlParseData;
 import edu.uci.ics.crawler4j.parser.ParseData;
 import edu.uci.ics.crawler4j.parser.Parser;
 import edu.uci.ics.crawler4j.robotstxt.RobotstxtServer;
 import edu.uci.ics.crawler4j.url.WebURL;
 
-import org.apache.http.HttpStatus;
-import org.apache.log4j.Logger;
-
-import java.util.ArrayList;
-import java.util.List;
-
 /**
  * WebCrawler class in the Runnable class that is executed by each crawler
  * thread.
- * 
+ *
  * @author Yasser Ganjisaffar <lastname at gmail dot com>
  */
 public class WebCrawler implements Runnable {
@@ -99,9 +108,11 @@ public class WebCrawler implements Runnable {
 	 */
 	private boolean isWaitingForNewURLs;
 
+	private List<LoginConfiguration> logined = new ArrayList<LoginConfiguration>();
+
 	/**
 	 * Initializes the current instance of the crawler
-	 * 
+	 *
 	 * @param myId
 	 *            the id of this crawler instance
 	 * @param crawlController
@@ -120,7 +131,7 @@ public class WebCrawler implements Runnable {
 
 	/**
 	 * Get the id of the current crawler instance
-	 * 
+	 *
 	 * @return the id of the current crawler instance
 	 */
 	public int getMyId() {
@@ -146,11 +157,11 @@ public class WebCrawler implements Runnable {
 	 */
 	public void onBeforeExit() {
 	}
-	
+
 	/**
-	 * This function is called once the header of a page is fetched.
-	 * It can be overwritten by sub-classes to perform custom logic
-	 * for different status codes. For example, 404 pages can be logged, etc.
+	 * This function is called once the header of a page is fetched. It can be
+	 * overwritten by sub-classes to perform custom logic for different status
+	 * codes. For example, 404 pages can be logged, etc.
 	 */
 	protected void handlePageStatusCode(WebURL webUrl, int statusCode, String statusDescription) {
 	}
@@ -202,7 +213,7 @@ public class WebCrawler implements Runnable {
 	 * Classes that extends WebCrawler can overwrite this function to tell the
 	 * crawler whether the given url should be crawled or not. The following
 	 * implementation indicates that all urls should be included in the crawl.
-	 * 
+	 *
 	 * @param url
 	 *            the url which we are interested to know whether it should be
 	 *            included in the crawl or not.
@@ -216,17 +227,73 @@ public class WebCrawler implements Runnable {
 	/**
 	 * Classes that extends WebCrawler can overwrite this function to process
 	 * the content of the fetched and parsed page.
-	 * 
+	 *
 	 * @param page
 	 *            the page object that is just fetched and parsed.
 	 */
 	public void visit(Page page) {
 	}
 
-	private void processPage(WebURL curURL) {
+	protected WebURL createRedirectWebURL(WebURL curURL, String movedToUrl) {
+		WebURL webURL = new WebURL();
+		webURL.setURL(movedToUrl);
+		webURL.setParentDocid(curURL.getParentDocid());
+		webURL.setParentUrl(curURL.getParentUrl());
+		webURL.setDepth(curURL.getDepth());
+		webURL.setDocid(-1);
+		webURL.setRedirectFrom(curURL);
+		webURL.setRedirectCount(curURL.getRedirectCount() + 1);
+		return webURL;
+	}
+
+	protected boolean login(LoginConfiguration conf) {
+		if (logined.contains(conf)) {
+			return true;
+		}
+
+		HttpPost httpost = new HttpPost(conf.getPost().toString());
+		List<NameValuePair> nvps = new ArrayList<NameValuePair>();
+		for (NameValuePair nvp : conf.getParams()) {
+			nvps.add(new BasicNameValuePair(nvp.getName(), nvp.getValue()));
+		}
+
+		try {
+			httpost.setEntity(new UrlEncodedFormEntity(nvps, HTTP.UTF_8));
+			HttpResponse res = myController.getPageFetcher().getHttpClient().execute(httpost);
+			int s = res.getStatusLine().getStatusCode();
+			if(s >= 400){
+				return false;
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+			return false;
+		}
+		logined.add(conf);
+		return true;
+	}
+
+	protected void processPage(WebURL curURL) {
 		if (curURL == null) {
 			return;
 		}
+
+		// login check
+		List<LoginConfiguration> confs = myController.getConfig().getLoginConfigurations();
+		if (confs.size() > 0) {
+			URL url;
+			try {
+				url = new URL(curURL.getURL());
+				for (LoginConfiguration conf : confs) {
+					if (conf.isSupport(url)) {
+						login(conf);
+						break;
+					}
+				}
+			} catch (MalformedURLException e1) {
+				e1.printStackTrace();
+			}
+		}
+
 		PageFetchResult fetchResult = null;
 		try {
 			fetchResult = pageFetcher.fetchHeader(curURL);
@@ -244,13 +311,9 @@ public class WebCrawler implements Runnable {
 							// Redirect page is already seen
 							return;
 						} else {
-							WebURL webURL = new WebURL();
-							webURL.setURL(movedToUrl);
-							webURL.setParentDocid(curURL.getParentDocid());
-							webURL.setParentUrl(curURL.getParentUrl());
-							webURL.setDepth(curURL.getDepth());
-							webURL.setDocid(-1);
-							if (shouldVisit(webURL) && robotstxtServer.allows(webURL)) {
+							WebURL webURL = createRedirectWebURL(curURL, movedToUrl);
+							if (webURL.getRedirectCount() < myController.getConfig().getMaxRedirectCount() && shouldVisit(webURL)
+									&& robotstxtServer.allows(webURL)) {
 								webURL.setDocid(docIdServer.getNewDocID(movedToUrl));
 								frontier.schedule(webURL);
 							}
@@ -325,6 +388,10 @@ public class WebCrawler implements Runnable {
 
 	public boolean isNotWaitingForNewURLs() {
 		return !isWaitingForNewURLs;
+	}
+
+	protected PageFetcher getPageFetcher() {
+		return pageFetcher;
 	}
 
 }

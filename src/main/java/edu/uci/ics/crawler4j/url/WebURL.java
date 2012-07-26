@@ -43,6 +43,8 @@ public class WebURL implements Serializable {
 	private String path;
 	private String anchor;
 	private byte priority;
+	private WebURL redirectFrom;
+	private int redirectCount = 0;
 
 	/**
 	 * Returns the unique document id assigned to this Url.
@@ -178,7 +180,7 @@ public class WebURL implements Serializable {
 	public String getAnchor() {
 		return anchor;
 	}
-	
+
 	public void setAnchor(String anchor) {
 		this.anchor = anchor;
 	}
@@ -195,5 +197,19 @@ public class WebURL implements Serializable {
 		this.priority = priority;
 	}
 
-	
+	public WebURL getRedirectFrom() {
+		return redirectFrom;
+	}
+
+	public void setRedirectFrom(WebURL redirectFrom) {
+		this.redirectFrom = redirectFrom;
+	}
+
+	public void setRedirectCount(int redirectCount) {
+		this.redirectCount = redirectCount;
+	}
+
+	public int getRedirectCount() {
+		return redirectCount;
+	}
 }

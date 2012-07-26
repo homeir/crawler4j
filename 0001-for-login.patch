@@ -1,0 +1,648 @@
+From 75177de89118e5ce938caf13cf96613e16096ee5 Mon Sep 17 00:00:00 2001
+From: pikotenta <pikotenta@gmail.com>
+Date: Mon, 2 Apr 2012 22:19:12 +0900
+Subject: [PATCH] for login
+
+---
+ .../edu/uci/ics/crawler4j/crawler/CrawlConfig.java |   32 +++++-
+ .../edu/uci/ics/crawler4j/crawler/WebCrawler.java  |  115 ++++++++++++++----
+ .../ics/crawler4j/login/LoginConfiguration.java    |   75 +++++++++++
+ .../java/edu/uci/ics/crawler4j/url/WebURL.java     |   20 +++-
+ .../examples/login/LoginCrawlController.java       |  132 ++++++++++++++++++++
+ .../ics/crawler4j/examples/login/LoginCrawler.java |   79 ++++++++++++
+ 6 files changed, 425 insertions(+), 28 deletions(-)
+ create mode 100644 src/main/java/edu/uci/ics/crawler4j/login/LoginConfiguration.java
+ create mode 100644 src/test/java/edu/uci/ics/crawler4j/examples/login/LoginCrawlController.java
+ create mode 100644 src/test/java/edu/uci/ics/crawler4j/examples/login/LoginCrawler.java
+
+diff --git a/src/main/java/edu/uci/ics/crawler4j/crawler/CrawlConfig.java b/src/main/java/edu/uci/ics/crawler4j/crawler/CrawlConfig.java
+index 2d831d6..ad01748 100644
+--- a/src/main/java/edu/uci/ics/crawler4j/crawler/CrawlConfig.java
++++ b/src/main/java/edu/uci/ics/crawler4j/crawler/CrawlConfig.java
+@@ -17,6 +17,11 @@
+ 
+ package edu.uci.ics.crawler4j.crawler;
+ 
++import java.util.ArrayList;
++import java.util.List;
++
++import edu.uci.ics.crawler4j.login.LoginConfiguration;
++
+ public class CrawlConfig {
+ 
+ 	/**
+@@ -102,6 +107,11 @@ public class CrawlConfig {
+ 	private boolean followRedirects = true;
+ 
+ 	/**
++	 * Maximum count of redirect
++	 */
++	private int maxRedirectCount = 5;
++
++	/**
+ 	 * If crawler should run behind a proxy, this parameter can be used for
+ 	 * specifying the proxy host.
+ 	 */
+@@ -127,12 +137,14 @@ public class CrawlConfig {
+ 	 */
+ 	private String proxyPassword = null;
+ 
++	private List<LoginConfiguration> loginConfigurations = new ArrayList<LoginConfiguration>();
++
+ 	public CrawlConfig() {
+ 	}
+ 
+ 	/**
+ 	 * Validates the configs specified by this instance.
+-	 * 
++	 *
+ 	 * @throws Exception
+ 	 */
+ 	public void validate() throws Exception {
+@@ -218,7 +230,7 @@ public class CrawlConfig {
+ 	/**
+ 	 * Politeness delay in milliseconds (delay between sending two requests to
+ 	 * the same host).
+-	 * 
++	 *
+ 	 * @param politenessDelay
+ 	 *            the delay in milliseconds.
+ 	 */
+@@ -326,6 +338,14 @@ public class CrawlConfig {
+ 		this.followRedirects = followRedirects;
+ 	}
+ 
++	public int getMaxRedirectCount() {
++		return maxRedirectCount;
++	}
++
++	public void setMaxRedirectCount(int maxRedirectCount) {
++		this.maxRedirectCount = maxRedirectCount;
++	}
++
+ 	public String getProxyHost() {
+ 		return proxyHost;
+ 	}
+@@ -376,6 +396,14 @@ public class CrawlConfig {
+ 		this.proxyPassword = proxyPassword;
+ 	}
+ 
++	public void addLoginConfiguration(LoginConfiguration conf){
++		loginConfigurations.add(conf);
++	}
++
++	public List<LoginConfiguration> getLoginConfigurations(){
++		return loginConfigurations;
++	}
++
+ 	@Override
+ 	public String toString() {
+ 		StringBuilder sb = new StringBuilder();
+diff --git a/src/main/java/edu/uci/ics/crawler4j/crawler/WebCrawler.java b/src/main/java/edu/uci/ics/crawler4j/crawler/WebCrawler.java
+index 725da27..bd5decc 100644
+--- a/src/main/java/edu/uci/ics/crawler4j/crawler/WebCrawler.java
++++ b/src/main/java/edu/uci/ics/crawler4j/crawler/WebCrawler.java
+@@ -17,27 +17,36 @@
+ 
+ package edu.uci.ics.crawler4j.crawler;
+ 
+-import edu.uci.ics.crawler4j.fetcher.PageFetchResult;
++import java.net.MalformedURLException;
++import java.net.URL;
++import java.util.ArrayList;
++import java.util.List;
++
++import org.apache.http.HttpResponse;
++import org.apache.http.HttpStatus;
++import org.apache.http.NameValuePair;
++import org.apache.http.client.entity.UrlEncodedFormEntity;
++import org.apache.http.client.methods.HttpPost;
++import org.apache.http.message.BasicNameValuePair;
++import org.apache.http.protocol.HTTP;
++import org.apache.log4j.Logger;
++
+ import edu.uci.ics.crawler4j.fetcher.CustomFetchStatus;
++import edu.uci.ics.crawler4j.fetcher.PageFetchResult;
+ import edu.uci.ics.crawler4j.fetcher.PageFetcher;
+ import edu.uci.ics.crawler4j.frontier.DocIDServer;
+ import edu.uci.ics.crawler4j.frontier.Frontier;
++import edu.uci.ics.crawler4j.login.LoginConfiguration;
+ import edu.uci.ics.crawler4j.parser.HtmlParseData;
+ import edu.uci.ics.crawler4j.parser.ParseData;
+ import edu.uci.ics.crawler4j.parser.Parser;
+ import edu.uci.ics.crawler4j.robotstxt.RobotstxtServer;
+ import edu.uci.ics.crawler4j.url.WebURL;
+ 
+-import org.apache.http.HttpStatus;
+-import org.apache.log4j.Logger;
+-
+-import java.util.ArrayList;
+-import java.util.List;
+-
+ /**
+  * WebCrawler class in the Runnable class that is executed by each crawler
+  * thread.
+- * 
++ *
+  * @author Yasser Ganjisaffar <lastname at gmail dot com>
+  */
+ public class WebCrawler implements Runnable {
+@@ -99,9 +108,11 @@ public class WebCrawler implements Runnable {
+ 	 */
+ 	private boolean isWaitingForNewURLs;
+ 
++	private List<LoginConfiguration> logined = new ArrayList<LoginConfiguration>();
++
+ 	/**
+ 	 * Initializes the current instance of the crawler
+-	 * 
++	 *
+ 	 * @param myId
+ 	 *            the id of this crawler instance
+ 	 * @param crawlController
+@@ -120,7 +131,7 @@ public class WebCrawler implements Runnable {
+ 
+ 	/**
+ 	 * Get the id of the current crawler instance
+-	 * 
++	 *
+ 	 * @return the id of the current crawler instance
+ 	 */
+ 	public int getMyId() {
+@@ -146,11 +157,11 @@ public class WebCrawler implements Runnable {
+ 	 */
+ 	public void onBeforeExit() {
+ 	}
+-	
++
+ 	/**
+-	 * This function is called once the header of a page is fetched.
+-	 * It can be overwritten by sub-classes to perform custom logic
+-	 * for different status codes. For example, 404 pages can be logged, etc.
++	 * This function is called once the header of a page is fetched. It can be
++	 * overwritten by sub-classes to perform custom logic for different status
++	 * codes. For example, 404 pages can be logged, etc.
+ 	 */
+ 	protected void handlePageStatusCode(WebURL webUrl, int statusCode, String statusDescription) {
+ 	}
+@@ -202,7 +213,7 @@ public class WebCrawler implements Runnable {
+ 	 * Classes that extends WebCrawler can overwrite this function to tell the
+ 	 * crawler whether the given url should be crawled or not. The following
+ 	 * implementation indicates that all urls should be included in the crawl.
+-	 * 
++	 *
+ 	 * @param url
+ 	 *            the url which we are interested to know whether it should be
+ 	 *            included in the crawl or not.
+@@ -216,17 +227,73 @@ public class WebCrawler implements Runnable {
+ 	/**
+ 	 * Classes that extends WebCrawler can overwrite this function to process
+ 	 * the content of the fetched and parsed page.
+-	 * 
++	 *
+ 	 * @param page
+ 	 *            the page object that is just fetched and parsed.
+ 	 */
+ 	public void visit(Page page) {
+ 	}
+ 
+-	private void processPage(WebURL curURL) {
++	protected WebURL createRedirectWebURL(WebURL curURL, String movedToUrl) {
++		WebURL webURL = new WebURL();
++		webURL.setURL(movedToUrl);
++		webURL.setParentDocid(curURL.getParentDocid());
++		webURL.setParentUrl(curURL.getParentUrl());
++		webURL.setDepth(curURL.getDepth());
++		webURL.setDocid(-1);
++		webURL.setRedirectFrom(curURL);
++		webURL.setRedirectCount(curURL.getRedirectCount() + 1);
++		return webURL;
++	}
++
++	protected boolean login(LoginConfiguration conf) {
++		if (logined.contains(conf)) {
++			return true;
++		}
++
++		HttpPost httpost = new HttpPost(conf.getPost().toString());
++		List<NameValuePair> nvps = new ArrayList<NameValuePair>();
++		for (NameValuePair nvp : conf.getParams()) {
++			nvps.add(new BasicNameValuePair(nvp.getName(), nvp.getValue()));
++		}
++
++		try {
++			httpost.setEntity(new UrlEncodedFormEntity(nvps, HTTP.UTF_8));
++			HttpResponse res = myController.getPageFetcher().getHttpClient().execute(httpost);
++			int s = res.getStatusLine().getStatusCode();
++			if(s >= 400){
++				return false;
++			}
++		} catch (Exception e) {
++			e.printStackTrace();
++			return false;
++		}
++		logined.add(conf);
++		return true;
++	}
++
++	protected void processPage(WebURL curURL) {
+ 		if (curURL == null) {
+ 			return;
+ 		}
++
++		// login check
++		List<LoginConfiguration> confs = myController.getConfig().getLoginConfigurations();
++		if (confs.size() > 0) {
++			URL url;
++			try {
++				url = new URL(curURL.getURL());
++				for (LoginConfiguration conf : confs) {
++					if (conf.isSupport(url)) {
++						login(conf);
++						break;
++					}
++				}
++			} catch (MalformedURLException e1) {
++				e1.printStackTrace();
++			}
++		}
++
+ 		PageFetchResult fetchResult = null;
+ 		try {
+ 			fetchResult = pageFetcher.fetchHeader(curURL);
+@@ -244,13 +311,9 @@ public class WebCrawler implements Runnable {
+ 							// Redirect page is already seen
+ 							return;
+ 						} else {
+-							WebURL webURL = new WebURL();
+-							webURL.setURL(movedToUrl);
+-							webURL.setParentDocid(curURL.getParentDocid());
+-							webURL.setParentUrl(curURL.getParentUrl());
+-							webURL.setDepth(curURL.getDepth());
+-							webURL.setDocid(-1);
+-							if (shouldVisit(webURL) && robotstxtServer.allows(webURL)) {
++							WebURL webURL = createRedirectWebURL(curURL, movedToUrl);
++							if (webURL.getRedirectCount() < myController.getConfig().getMaxRedirectCount() && shouldVisit(webURL)
++									&& robotstxtServer.allows(webURL)) {
+ 								webURL.setDocid(docIdServer.getNewDocID(movedToUrl));
+ 								frontier.schedule(webURL);
+ 							}
+@@ -327,4 +390,8 @@ public class WebCrawler implements Runnable {
+ 		return !isWaitingForNewURLs;
+ 	}
+ 
++	protected PageFetcher getPageFetcher() {
++		return pageFetcher;
++	}
++
+ }
+diff --git a/src/main/java/edu/uci/ics/crawler4j/login/LoginConfiguration.java b/src/main/java/edu/uci/ics/crawler4j/login/LoginConfiguration.java
+new file mode 100644
+index 0000000..7845c12
+--- /dev/null
++++ b/src/main/java/edu/uci/ics/crawler4j/login/LoginConfiguration.java
+@@ -0,0 +1,75 @@
++package edu.uci.ics.crawler4j.login;
++
++import java.net.URL;
++import java.util.ArrayList;
++import java.util.List;
++
++import org.apache.http.NameValuePair;
++import org.apache.http.message.BasicNameValuePair;
++
++public class LoginConfiguration {
++	private String host;
++	private URL loginForm;
++	private URL post;
++	private List<NameValuePair> params = new ArrayList<NameValuePair>();
++
++	public LoginConfiguration(String host, URL loginForm, URL post) {
++		this.host = host;
++		this.loginForm = loginForm;
++		this.post = post;
++	}
++
++	public void addParam(String name, String value) {
++		params.add(new BasicNameValuePair(name, value));
++	}
++
++	public boolean isSupport(URL url) {
++		return url.getHost().equals(host);
++	}
++
++	public URL getPost() {
++		return post;
++	}
++
++	public List<NameValuePair> getParams() {
++		return params;
++	}
++
++	@Override
++	public int hashCode() {
++		final int prime = 31;
++		int result = 1;
++		result = prime * result + ((loginForm == null) ? 0 : loginForm.hashCode());
++		result = prime * result + ((params == null) ? 0 : params.hashCode());
++		result = prime * result + ((post == null) ? 0 : post.hashCode());
++		return result;
++	}
++
++	@Override
++	public boolean equals(Object obj) {
++		if (this == obj)
++			return true;
++		if (obj == null)
++			return false;
++		if (getClass() != obj.getClass())
++			return false;
++		LoginConfiguration other = (LoginConfiguration) obj;
++		if (loginForm == null) {
++			if (other.loginForm != null)
++				return false;
++		} else if (!loginForm.equals(other.loginForm))
++			return false;
++		if (params == null) {
++			if (other.params != null)
++				return false;
++		} else if (!params.equals(other.params))
++			return false;
++		if (post == null) {
++			if (other.post != null)
++				return false;
++		} else if (!post.equals(other.post))
++			return false;
++		return true;
++	}
++
++}
+diff --git a/src/main/java/edu/uci/ics/crawler4j/url/WebURL.java b/src/main/java/edu/uci/ics/crawler4j/url/WebURL.java
+index 5a093ae..3ae820e 100644
+--- a/src/main/java/edu/uci/ics/crawler4j/url/WebURL.java
++++ b/src/main/java/edu/uci/ics/crawler4j/url/WebURL.java
+@@ -43,6 +43,8 @@ public class WebURL implements Serializable {
+ 	private String path;
+ 	private String anchor;
+ 	private byte priority;
++	private WebURL redirectFrom;
++	private int redirectCount = 0;
+ 
+ 	/**
+ 	 * Returns the unique document id assigned to this Url.
+@@ -178,7 +180,7 @@ public class WebURL implements Serializable {
+ 	public String getAnchor() {
+ 		return anchor;
+ 	}
+-	
++
+ 	public void setAnchor(String anchor) {
+ 		this.anchor = anchor;
+ 	}
+@@ -195,5 +197,19 @@ public class WebURL implements Serializable {
+ 		this.priority = priority;
+ 	}
+ 
+-	
++	public WebURL getRedirectFrom() {
++		return redirectFrom;
++	}
++
++	public void setRedirectFrom(WebURL redirectFrom) {
++		this.redirectFrom = redirectFrom;
++	}
++
++	public void setRedirectCount(int redirectCount) {
++		this.redirectCount = redirectCount;
++	}
++
++	public int getRedirectCount() {
++		return redirectCount;
++	}
+ }
+diff --git a/src/test/java/edu/uci/ics/crawler4j/examples/login/LoginCrawlController.java b/src/test/java/edu/uci/ics/crawler4j/examples/login/LoginCrawlController.java
+new file mode 100644
+index 0000000..a9a864e
+--- /dev/null
++++ b/src/test/java/edu/uci/ics/crawler4j/examples/login/LoginCrawlController.java
+@@ -0,0 +1,132 @@
++/**
++ * Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.
++ * The ASF licenses this file to You under the Apache License, Version 2.0
++ * (the "License"); you may not use this file except in compliance with
++ * the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package edu.uci.ics.crawler4j.examples.login;
++
++import java.net.MalformedURLException;
++import java.net.URL;
++
++import edu.uci.ics.crawler4j.crawler.CrawlConfig;
++import edu.uci.ics.crawler4j.crawler.CrawlController;
++import edu.uci.ics.crawler4j.fetcher.PageFetcher;
++import edu.uci.ics.crawler4j.login.LoginConfiguration;
++import edu.uci.ics.crawler4j.robotstxt.RobotstxtConfig;
++import edu.uci.ics.crawler4j.robotstxt.RobotstxtServer;
++
++/**
++ * @author Yasser Ganjisaffar <lastname at gmail dot com>
++ */
++public class LoginCrawlController {
++
++	public static void main(String[] args) throws Exception {
++		if (args.length != 2) {
++			System.out.println("Needed parameters: ");
++			System.out.println("\t rootFolder (it will contain intermediate crawl data)");
++			System.out.println("\t numberOfCralwers (number of concurrent threads)");
++			return;
++		}
++
++		/*
++		 * crawlStorageFolder is a folder where intermediate crawl data is
++		 * stored.
++		 */
++		String crawlStorageFolder = args[0];
++
++		/*
++		 * numberOfCrawlers shows the number of concurrent threads that should
++		 * be initiated for crawling.
++		 */
++		int numberOfCrawlers = Integer.parseInt(args[1]);
++
++		CrawlConfig config = new CrawlConfig();
++
++		config.setCrawlStorageFolder(crawlStorageFolder);
++
++		/*
++		 * Be polite: Make sure that we don't send more than 1 request per
++		 * second (1000 milliseconds between requests).
++		 */
++		config.setPolitenessDelay(1000);
++
++		/*
++		 * You can set the maximum crawl depth here. The default value is -1 for
++		 * unlimited depth
++		 */
++		config.setMaxDepthOfCrawling(1);
++
++		/*
++		 * You can set the maximum number of pages to crawl. The default value
++		 * is -1 for unlimited number of pages
++		 */
++		config.setMaxPagesToFetch(1000);
++
++		/*
++		 * Do you need to set a proxy? If so, you can use:
++		 * config.setProxyHost("proxyserver.example.com");
++		 * config.setProxyPort(8080);
++		 *
++		 * If your proxy also needs authentication:
++		 * config.setProxyUsername(username); config.getProxyPassword(password);
++		 */
++
++		/*
++		 * This config parameter can be used to set your crawl to be resumable
++		 * (meaning that you can resume the crawl from a previously
++		 * interrupted/crashed crawl). Note: if you enable resuming feature and
++		 * want to start a fresh crawl, you need to delete the contents of
++		 * rootFolder manually.
++		 */
++		config.setResumableCrawling(false);
++
++		config.setIncludeHttpsPages(true);
++
++		LoginConfiguration somesite;
++		try {
++			somesite = new LoginConfiguration("www.xxxxxxxxxxxx.com", new URL("https://secure.xxxxxxxxxxxx.com/login_form"), new URL(
++					"https://secure.xxxxxxxxxxxx.com/login_post"));
++			//somesite.addParam("userid", "your_userid_address_3289sdf2323432fsd");
++			somesite.addParam("mail", "your_mail_address_3289sdf2323432fsd@gmail.com");
++			somesite.addParam("password", "xcif2weiokj5ro32-74-028345v-203m859qfsda");
++			somesite.addParam("submit", "login");
++			config.addLoginConfiguration(somesite);
++		} catch (MalformedURLException e) {
++			e.printStackTrace();
++		}
++
++		/*
++		 * Instantiate the controller for this crawl.
++		 */
++		PageFetcher pageFetcher = new PageFetcher(config);
++		RobotstxtConfig robotstxtConfig = new RobotstxtConfig();
++		RobotstxtServer robotstxtServer = new RobotstxtServer(robotstxtConfig, pageFetcher);
++		CrawlController controller = new CrawlController(config, pageFetcher, robotstxtServer);
++
++		/*
++		 * For each crawl, you need to add some seed urls. These are the first
++		 * URLs that are fetched and then the crawler starts following links
++		 * which are found in these pages
++		 */
++
++		controller.addSeed("http://www.xxxxxxxxxxxx.com/some_login_protected_page");
++
++		/*
++		 * Start the crawl. This is a blocking operation, meaning that your code
++		 * will reach the line after this only when crawling is finished.
++		 */
++		controller.start(LoginCrawler.class, numberOfCrawlers);
++	}
++}
+diff --git a/src/test/java/edu/uci/ics/crawler4j/examples/login/LoginCrawler.java b/src/test/java/edu/uci/ics/crawler4j/examples/login/LoginCrawler.java
+new file mode 100644
+index 0000000..e89741e
+--- /dev/null
++++ b/src/test/java/edu/uci/ics/crawler4j/examples/login/LoginCrawler.java
+@@ -0,0 +1,79 @@
++/**
++ * Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.
++ * The ASF licenses this file to You under the Apache License, Version 2.0
++ * (the "License"); you may not use this file except in compliance with
++ * the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package edu.uci.ics.crawler4j.examples.login;
++
++import java.util.List;
++import java.util.regex.Pattern;
++
++import edu.uci.ics.crawler4j.crawler.Page;
++import edu.uci.ics.crawler4j.crawler.WebCrawler;
++import edu.uci.ics.crawler4j.parser.HtmlParseData;
++import edu.uci.ics.crawler4j.url.WebURL;
++
++/**
++ * @author Yasser Ganjisaffar <lastname at gmail dot com>
++ */
++public class LoginCrawler extends WebCrawler {
++
++	private final static Pattern FILTERS = Pattern.compile(".*(\\.(css|js|bmp|gif|jpe?g" + "|png|tiff?|mid|mp2|mp3|mp4" + "|wav|avi|mov|mpeg|ram|m4v|pdf"
++			+ "|rm|smil|wmv|swf|wma|zip|rar|gz))$");
++
++	/**
++	 * You should implement this function to specify whether the given url
++	 * should be crawled or not (based on your crawling logic).
++	 */
++	@Override
++	public boolean shouldVisit(WebURL url) {
++		String href = url.getURL().toLowerCase();
++		return !FILTERS.matcher(href).matches() && href.startsWith("http://www.ics.uci.edu/");
++	}
++
++	/**
++	 * This function is called when a page is fetched and ready to be processed
++	 * by your program.
++	 */
++	@Override
++	public void visit(Page page) {
++		int docid = page.getWebURL().getDocid();
++		String url = page.getWebURL().getURL();
++		String domain = page.getWebURL().getDomain();
++		String path = page.getWebURL().getPath();
++		String subDomain = page.getWebURL().getSubDomain();
++		String parentUrl = page.getWebURL().getParentUrl();
++
++		System.out.println("Docid: " + docid);
++		System.out.println("URL: " + url);
++		System.out.println("Domain: '" + domain + "'");
++		System.out.println("Sub-domain: '" + subDomain + "'");
++		System.out.println("Path: '" + path + "'");
++		System.out.println("Parent page: " + parentUrl);
++
++		if (page.getParseData() instanceof HtmlParseData) {
++			HtmlParseData htmlParseData = (HtmlParseData) page.getParseData();
++			String text = htmlParseData.getText();
++			String html = htmlParseData.getHtml();
++			List<WebURL> links = htmlParseData.getOutgoingUrls();
++
++			System.out.println("Text length: " + text.length());
++			System.out.println("Html length: " + html.length());
++			System.out.println("Number of outgoing links: " + links.size());
++		}
++
++		System.out.println("=============");
++	}
++}
+-- 
+1.7.8.msysgit.0
+
