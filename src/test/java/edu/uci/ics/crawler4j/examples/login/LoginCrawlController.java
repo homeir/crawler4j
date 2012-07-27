@@ -96,13 +96,12 @@ public class LoginCrawlController {
 
 		LoginConfiguration somesite;
 		try {
-			somesite = new LoginConfiguration("www.xxxxxxxxxxxx.com", new URL("https://secure.xxxxxxxxxxxx.com/login_form"), new URL(
-					"https://secure.xxxxxxxxxxxx.com/login_post"));
+			somesite = new LoginConfiguration("fr.vente-privee.com", new URL("http://fr.vente-privee.com/vp4/Login/Portal.ashx"), new URL(
+					"http://fr.vente-privee.com/vp4/Home/fr/Portal_FR.aspx"));
 			//somesite.addParam("userid", "your_userid_address_3289sdf2323432fsd");
-			somesite.addParam("mail", "your_mail_address_3289sdf2323432fsd@gmail.com");
-			somesite.addParam("password", "xcif2weiokj5ro32-74-028345v-203m859qfsda");
-			somesite.addParam("submit", "login");
-			config.addLoginConfiguration(somesite);
+			somesite.addParam("txtEmail", "homeir@gmail.com");
+			somesite.addParam("txtPassword", "188988hunter");
+			somesite.addParam("btSubmit", "OK");
 		} catch (MalformedURLException e) {
 			e.printStackTrace();
 		}
@@ -121,7 +120,7 @@ public class LoginCrawlController {
 		 * which are found in these pages
 		 */
 
-		controller.addSeed("http://www.xxxxxxxxxxxx.com/some_login_protected_page");
+		controller.addSeed("http://fr.vente-privee.com/vp4/");
 
 		/*
 		 * Start the crawl. This is a blocking operation, meaning that your code
